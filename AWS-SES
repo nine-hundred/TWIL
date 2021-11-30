@@ -1,0 +1,125 @@
+# AWS-SES로의 여정
+
+<aside>
+💡 종착역이 SES가 아닐 수 있습니다ㅠ
+
+</aside>
+
+## 발단
+
+현재 사용자에게 메일을 보내는 로직은 아래와 같다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled.png)
+
+서버에서 직접 사용자에게 이메일을 보내지 않고, G-suite의 Gmail을 사용해서 사용자에게 메일을 보내는 상황이다. 즉, **'*Gmail아 너가 저사람에게 이메일 보내줘!*'** 라고 하는 상태이다. 그러나 문제는, Gmail이 보내는 메일이 사용자가 사용하고 있는 ISP(ex: 네이버메일, Gmail, outlook ...)에 따라 종종 ***스펨으로 분류***되기도 한다는 것이다.(네이버는 스펨으로 분류되지 않고, outlook은 스펨으로, Gmail은 계정에 따라 다름;;)
+
+Gmail에서 100% 신뢰성있는 메일을 보내지 않고 있기에, 다른 대안을 찾아나섰다. (~~직접 메일서버를 관리하는건 배보다 배꼽이 더 클 경우도 있기에 제외.~~)
+
+1. Sendbird
+2. SES(Simple-Email-Service)
+3. SparkPost
+4. PostMark
+
+위 4개의 옵션 중, 1번은 메일서비스의 후기가 좋지 않았고, 3번과 4번은 매달 10달러 이상의 비용이 나가기 때문에 제외. **남은건 SES**. 비용도 월 6만건은 무료, 이후로는 천건 당 0.1달러. 또한 같은 AWS그룹이라 Route53을 통해 쉽게 도메인 연결 및 인증이 쉬울거라고 생각하여 SES를 선정하였다.
+
+## 전개
+
+### 1. SES 설정
+
+SES에 들어가자 마자 "Create identity"를 클릭하면 아래와 같은 화면을 볼 수 있다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%201.png)
+
+우리는 도메인인 `[*****.com](http://*****.com)`와 발신전용계정인 `no-reply@*****.com`를 인증해주어야 한다. 결국에 Domain과 Email address둘다 생성해야 한다는 말이다...
+
+Email address를 클릭하고 "no-reply@*****.com"를 입력한 뒤 `Create identity` 를 클릭하면 쉽게 생성된다. 
+
+Domain도 Email address와 크게 다르지 않다. "*****.com"를 입력하면, ***"이미 Route53에 들어가 있는 도메인과 같은데 연동해줄까?"*** 라는 내용의 팝업이 뜬다. DKIM과 도메인 인증을 한번에 쉽게 할 수 있다. 여기서 주의해야 할 점은 **Domain의 mx레코드를 확인해야 한다는 점**이다. 이미 Gmail로 mx레코드를 설정하고 있기에, 덮어쓰지 않게 주의를 기울여야 한다.(mx레코드 날리면 메일서버가 작동안하는 불상사가 발생한다!) 확인버튼을 누르고 verify가 뜰때까지 5분여정도 대기시간이 발생된다. 
+
+5분이 지난 후, verified identities에 들어가면  `[*****.com](http://*****.com)`와 `no-reply@*****.com` 둘 다 verified가 되었다고 표기된다.
+
+![Untitled.png](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%202.png)
+
+SES로 메일을 보내는 방법은 크게 2가지이다. `API로 요청`과 `SMTP` 가 있다. 기존에 사용하였던 SMTP방식으로 보내기 위해서는 SES의 usernacom과 password 필요하다. SES에서는 이걸 `SES SMTP 자격증명`이라고 하는데, SMTP 자격증명을 받기 위해서 왼쪽 탐색창에서 "Account dashboard"클릭 후, 밑으로 가보면 SMTP settings를 볼 수 있다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%203.png)
+
+위 화면에서 "Create SMTP credentials"를 클릭하면 AWS IAM으로 가게 된다. 여기서 SES 사용에 필요한 엑세스 권한을 가지고 있는 계정을 생성하는 것이다. *즉,* `SES SMTP 자격증명`*이 "SES 전용 IAM 계정"을 만드는것이다...*
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%204.png)
+
+어쨋든 [생성]버튼을 눌러 생성하면 .csv파일로 usernacom과 password를 받게 된다. 이를 가지고 SMTP로 테스트 메일을 보내서 SES로 메일을 보낼 수 있는지 확인을 해 보자.
+
+### 2. 테스트 메일을 보내보자.
+
+아래는 Gomail을 사용해서 작성한 메일을 보내는 예시 코드이다.
+
+```go
+func main() {
+	m := gomail.Newcomssage()
+	m.SetBody("text/html", "내용")
+	m.SetHeaders(map[string][]string{
+		"From":	{m.FormatAddress("no-reply@*****.com", "발신전용계정")},
+		"To": {"900@*****.com"},
+		"Subject": {"제목, 가즈아!"},
+	})
+
+	host := "email-smtp.ap-northeast-2.amazonaws.com"
+	port := 587
+	d := gomail.NewDialer(host, port,
+		"Usernacom", "Password")
+	if err := d.DialAndSend(m); err != nil {
+		panic(err)
+	}
+
+}
+```
+
+Gmail로 가보면 아래와 같이 Gmail에서도 스펨으로 분류하지 않고 있다는걸 확인할 수 있다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%205.png)
+
+## 위기
+
+네이버와 Outlook 등으로도 메일이 잘 가는지 확인하고자 코드를 실행시켰으나, 아래와 같은 에러를 받는다.
+
+> panic: gomail: could not send email 1: 554 comssage rejected: Email address is not verified. The following identities failed the check in region AP-NORTHEAST-2: "your@email.com"
+> 
+
+요약하자면, **니가 보낸 메일은 거절당했어!** 
+
+구글신의 도움을 통해 발견한 문제는 SES의 `Sendbox 환경` 이다. 우리가 위에서 등록한 [`*****.com`](http://*****.com) 도메인과 `no-reply@*****.com` 안에서는 메일이 잘 도착했는지 확인 할 수 있었지만, naver나 outlook같은 등록하지 않은 도메인에서는 SES가 메일을 거절하는 것이다. 이유는 테스트메일을 남발하면 각 ISP가 관리한는 reputation 테이블에 좋지 않게 작성되기 때문이다. 따라서 `Sendbox 환경` 을 만들어줄테니, 여기서 테스트 한 뒤 프로덕션환경으로 가라고 배려아닌 배려를 해준 셈이다.
+
+![~~어쩐지 Account dashboard에 빨간색 느낌표가 있었으나, 뭔소린지 몰라 그냥 지나쳤음;;~~](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%206.png)
+
+~~어쩐지 Account dashboard에 빨간색 느낌표가 있었으나, 뭔소린지 몰라 그냥 지나쳤음;;~~
+
+[Request production access]버튼을 눌러 `Sendbox 환경`에서 벗어날 수 있도록 요청을 보내도록 합시다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%207.png)
+
+Mail type에는 Transactional표기
+
+Website URL에는 https://info.*****.com
+
+Use case description에는 사용자 이메일 인증과 비밀번호 분실 시 사용할거라고 영작을 하자...
+
+Additional contacts에는 SES상에서 문제가 생겼거나 알림 등의 메일을 받을 이메일을 작성 후,
+
+[Submit request]버튼을 눌러 제출하면 `Sendbox 환경`에서 벗어날 수 있도록 요청을 한 셈이다.
+
+![Untitled](AWS-SES%E1%84%85%E1%85%A9%E1%84%8B%E1%85%B4%20%E1%84%8B%E1%85%A7%E1%84%8C%E1%85%A5%E1%86%BC%200d325b17edec475b8ae46e1e7fb2f0f9/Untitled%208.png)
+
+## 결말
+
+Writing In Progress...
+
+### 참고
+
+[AWS-SES 공식문서](https://docs.aws.amazon.com/ko_kr/ses/)
+
+[http://devstory.ibksplatform.com/2018/05/aws-ses.html](http://devstory.ibksplatform.com/2018/05/aws-ses.html)
+
+[https://velog.io/@chrishan/Sending-email-using-AWS-SES-GO](https://velog.io/@chrishan/Sending-email-using-AWS-SES-GO)
+
+[https://inspireworld.tistory.com/40](https://inspireworld.tistory.com/40)
