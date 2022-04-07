@@ -3,6 +3,7 @@ package main
 import "fmt"
 
 // 고객이 웨이터에게 음식을 주문하는 command pattern
+
 type FoodCommand interface {
 	order()
 }
@@ -29,7 +30,7 @@ func (pasta *PastaCommand) order() {
 
 type Customer struct {
 	command []FoodCommand
-	bills int
+	bills   int
 }
 
 func (c *Customer) call() {
